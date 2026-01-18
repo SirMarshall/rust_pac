@@ -3,25 +3,10 @@ use ggez::glam::Vec2;
 use ggez::graphics::{self, Color, DrawParam, Image, Rect};
 use ggez::input::keyboard::{KeyCode, KeyInput};
 use ggez::{Context, ContextBuilder, GameResult};
-
+use rust_pack::*;
 use std::env;
+use std::io::Read;
 use std::path;
-
-// --- Constants ---
-const TILE_SIZE: f32 = 8.0; // Size of a single tile in pixels.
-const MAZE_OFFSET_Y: f32 = TILE_SIZE * 5.0; // Vertical offset for the maze to make space for UI elements.
-const WALL_CODE_OFFSET: u8 = 100; // Offset added to wall mask to distinguish wall types in `display_map`.
-const PLAYER_SPEED: f32 = 40.0; // Player movement speed in pixels per second.
-
-// Represents the cardinal directions and a stopped state for movement.
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum Direction {
-    North,
-    East,
-    South,
-    West,
-    Stopped,
-}
 
 // Main entry point of the game.
 fn main() -> GameResult {
@@ -52,8 +37,8 @@ fn main() -> GameResult {
 
 // Represents the player character.
 struct Player {
-    pos: Vec2, // Current position of the player (center of sprite).
-    direction: Direction, // Current actual movement direction.
+    pos: Vec2,               // Current position of the player (center of sprite).
+    direction: Direction,    // Current actual movement direction.
     desired_direction: Direction, // Direction input by the player, used for turning logic.
     sprite_rects: Vec<Rect>, // Normalized UV coordinates for player animation frames.
 }
@@ -61,12 +46,12 @@ struct Player {
 // Holds all the game's state, assets, and game logic data.
 struct GameState {
     wall_images: Vec<Image>, // Loaded images for different wall configurations.
-    sprite_sheet: Image, // Single sprite sheet for player and dots.
+    sprite_sheet: Image,     // Single sprite sheet for player and dots.
     display_map: Vec<Vec<u8>>, // Map used for drawing, includes pre-calculated wall configurations.
     level_map: Vec<Vec<u8>>, // Base map for game logic (walls, dots, empty spaces).
-    small_dot_rect: Rect, // UV coordinates for the small dot sprite.
-    big_dot_rect: Rect, // UV coordinates for the big dot (power pellet) sprite.
-    player: Player, // The player character.
+    small_dot_rect: Rect,    // UV coordinates for the small dot sprite.
+    big_dot_rect: Rect,      // UV coordinates for the big dot (power pellet) sprite.
+    player: Player,          // The player character.
 }
 
 // --- GameState Implementation ---
@@ -114,84 +99,11 @@ impl GameState {
             sprite_height_normalized,
         );
 
-        // Define the base level map: 1 = Wall, 2 = Small Dot, 3 = Big Dot, 0 = Empty/Walkable path.
-        let level_map = vec![
-            vec![
-                1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-            ],
-            vec![
-                1, 3, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 1,
-            ],
-            vec![
-                1, 2, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 2, 1, 1, 2, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 2, 1,
-            ],
-            vec![
-                1, 2, 1, 0, 0, 1, 2, 1, 0, 0, 0, 1, 2, 1, 1, 2, 1, 0, 0, 0, 1, 2, 1, 0, 0, 1, 2, 1,
-            ],
-            vec![
-                1, 2, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 2, 1, 1, 2, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 2, 1,
-            ],
-            vec![
-                1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1,
-            ],
-            vec![
-                1, 2, 1, 1, 1, 1, 2, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 1, 2, 1, 1, 2, 1, 1, 1, 1, 2, 1,
-            ],
-            vec![
-                1, 2, 2, 2, 2, 2, 2, 1, 1, 2, 2, 2, 2, 1, 1, 2, 2, 2, 2, 1, 1, 2, 2, 2, 2, 2, 2, 1,
-            ],
-            vec![
-                1, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 0, 1, 1, 0, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 1,
-            ],
-            vec![
-                1, 0, 0, 0, 0, 1, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 2, 1, 0, 0, 0, 0, 1,
-            ],
-            vec![
-                1, 0, 0, 0, 0, 1, 2, 1, 1, 0, 1, 1, 1, 0, 0, 1, 1, 1, 0, 1, 1, 2, 1, 0, 0, 0, 0, 1,
-            ],
-            vec![
-                1, 1, 1, 1, 1, 1, 2, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 2, 1, 1, 1, 1, 1, 1,
-            ],
-            vec![
-                0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0,
-            ],
-            vec![
-                1, 1, 1, 1, 1, 1, 2, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 2, 1, 1, 1, 1, 1, 1,
-            ],
-            vec![
-                1, 0, 0, 0, 0, 1, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 2, 1, 0, 0, 0, 0, 1,
-            ],
-            vec![
-                1, 0, 0, 0, 0, 1, 2, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 2, 1, 0, 0, 0, 0, 1,
-            ],
-            vec![
-                1, 1, 1, 1, 1, 1, 2, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 2, 1, 1, 1, 1, 1, 1,
-            ],
-            vec![
-                1, 3, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 1,
-            ],
-            vec![
-                1, 2, 1, 1, 1, 1, 2, 1, 1, 1, 1, 1, 2, 1, 1, 2, 1, 1, 1, 1, 1, 2, 1, 1, 1, 1, 2, 1,
-            ],
-            vec![
-                1, 2, 2, 2, 1, 1, 2, 2, 2, 2, 2, 2, 2, 0, 0, 2, 2, 2, 2, 2, 2, 2, 1, 1, 2, 2, 2, 1,
-            ],
-            vec![
-                1, 1, 1, 2, 1, 1, 2, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 1, 2, 1, 1, 2, 1, 1, 2, 1, 1, 1,
-            ],
-            vec![
-                1, 2, 2, 2, 2, 2, 2, 1, 1, 2, 2, 2, 2, 1, 1, 2, 2, 2, 2, 1, 1, 2, 2, 2, 2, 2, 2, 1,
-            ],
-            vec![
-                1, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 1, 1, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 1,
-            ],
-            vec![
-                1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1,
-            ],
-            vec![
-                1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-            ],
-        ];
+        // Load level map from file
+        let mut file = ctx.fs.open("/levels/level1.txt")?;
+        let mut content = String::new();
+        file.read_to_string(&mut content)?;
+        let level_map = load_level_from_string(&content);
 
         // Create `display_map` by calculating wall masks for graphical representation.
         // A wall mask (0-15) indicates which adjacent tiles (N, S, W, E) are also walls.
@@ -237,45 +149,6 @@ impl GameState {
             player,
         })
     }
-}
-
-// --- Helper Functions ---
-
-// Checks if a tile at given map coordinates is a wall. Handles out-of-bounds coordinates by treating them as walls.
-fn is_wall_at(x: isize, y: isize, map: &Vec<Vec<u8>>) -> bool {
-    if y < 0 || y >= map.len() as isize || x < 0 || x >= map[0].len() as isize {
-        return true; // Outside map boundaries are considered walls.
-    }
-    map[y as usize][x as usize] == 1 // Check if the tile value is '1' (wall).
-}
-
-// Converts pixel coordinates to map coordinates and checks if the corresponding tile is walkable.
-fn is_tile_walkable(pixel_x: f32, pixel_y: f32, map: &Vec<Vec<u8>>) -> bool {
-    let map_y = ((pixel_y - MAZE_OFFSET_Y) / TILE_SIZE) as isize;
-    let map_x = (pixel_x / TILE_SIZE) as isize;
-    !is_wall_at(map_x, map_y, map) // Returns true if the tile is NOT a wall.
-}
-
-// Checks if all four corners of a given Rect are on walkable tiles, used for collision detection.
-fn is_rect_walkable(rect: Rect, level_map: &Vec<Vec<u8>>) -> bool {
-    let right_edge = rect.x + rect.w - 1.0;
-    let bottom_edge = rect.y + rect.h - 1.0;
-
-    // Check each corner: top-left, top-right, bottom-left, bottom-right.
-    if !is_tile_walkable(rect.x, rect.y, level_map) {
-        return false;
-    }
-    if !is_tile_walkable(right_edge, rect.y, level_map) {
-        return false;
-    }
-    if !is_tile_walkable(rect.x, bottom_edge, level_map) {
-        return false;
-    }
-    if !is_tile_walkable(right_edge, bottom_edge, level_map) {
-        return false;
-    }
-
-    true // All corners are walkable.
 }
 
 // --- ggez EventHandler Implementation ---
