@@ -22,7 +22,7 @@ struct EditorState {
     level_map: Vec<Vec<u8>>,
     small_dot_rect: Rect,
     big_dot_rect: Rect,
-    current_tool: u8, // 0: Empty, 1: Wall, 2: Small Dot, 3: Big Dot
+    current_tool: u8, // 0: Empty, 1: Wall, 2: Small Dot, 3: Big Dot, 4: Door
     filepath: String,
     mode: EditorMode,
     font: String,
@@ -56,7 +56,7 @@ impl EditorState {
             sprite_height_normalized,
         );
 
-        let level_map = if let Ok(mut file) = ctx.fs.open(filepath) {
+        let mut level_map = if let Ok(mut file) = ctx.fs.open(filepath) {
             let mut content = String::new();
             if file.read_to_string(&mut content).is_ok() {
                 println!("Loaded level from {}", filepath);
@@ -69,6 +69,9 @@ impl EditorState {
             eprintln!("Failed to open level file: {}", filepath);
             create_default_map()
         };
+
+        // Enforce ghost house initially
+        Self::enforce_ghost_house(&mut level_map);
 
         let font = "LiberationMono-Regular".to_string();
 
@@ -96,6 +99,38 @@ impl EditorState {
         };
         state.update_display_map();
         Ok(state)
+    }
+
+    fn enforce_ghost_house(map: &mut Vec<Vec<u8>>) {
+        // Enforce the ghost house structure based on level1.txt coordinates
+        
+        // Door (Row 11)
+        if map.len() > 11 {
+            map[11][13] = 4; // Door
+            map[11][14] = 4; // Door
+        }
+
+        // Top Walls (Row 12)
+        if map.len() > 12 {
+            for x in 10..=12 { map[12][x] = 1; }
+            map[12][13] = 0; // Gap under door
+            map[12][14] = 0; // Gap under door
+            for x in 15..=17 { map[12][x] = 1; }
+        }
+
+        // Side Walls and Interior (Rows 13-15)
+        for y in 13..=15 {
+            if map.len() > y {
+                map[y][10] = 1; // Left Wall
+                map[y][17] = 1; // Right Wall
+                for x in 11..=16 { map[y][x] = 0; } // Interior Empty
+            }
+        }
+
+        // Bottom Wall (Row 16)
+        if map.len() > 16 {
+            for x in 10..=17 { map[16][x] = 1; }
+        }
     }
 
     fn update_display_map(&mut self) {
@@ -157,7 +192,6 @@ impl EditorState {
             
             let window = ctx.gfx.window();
             let size = window.inner_size();
-            // Use physical size for scaling to handle potential HiDPI mouse issues on Linux
             let scale_x = size.width as f32 / 448.0;
             let scale_y = size.height as f32 / 320.0;
             
@@ -175,6 +209,7 @@ impl EditorState {
                 match i {
                     0 => {
                         self.level_map = create_default_map();
+                        Self::enforce_ghost_house(&mut self.level_map);
                         self.update_display_map();
                         self.mode = EditorMode::Editing;
                     }
@@ -183,6 +218,7 @@ impl EditorState {
                             let mut content = String::new();
                             if file.read_to_string(&mut content).is_ok() {
                                 self.level_map = load_level_from_string(&content);
+                                Self::enforce_ghost_house(&mut self.level_map);
                                 self.update_display_map();
                             }
                         }
@@ -246,7 +282,6 @@ impl EditorState {
         
         let window = ctx.gfx.window();
         let size = window.inner_size();
-        // Use physical size for scaling to handle potential HiDPI mouse issues on Linux
         let scale_x = size.width as f32 / 448.0;
         let scale_y = size.height as f32 / 320.0;
 
@@ -289,6 +324,8 @@ impl EditorState {
                     }
                     
                     if changed {
+                        // Re-enforce ghost house protection
+                        Self::enforce_ghost_house(&mut self.level_map);
                         self.update_display_map();
                     }
                 }
@@ -390,7 +427,6 @@ impl EditorState {
         let mouse = ctx.mouse.position();
         let window = ctx.gfx.window();
         let size = window.inner_size();
-        // Use physical size for scaling to handle potential HiDPI mouse issues on Linux
         let scale_x = size.width as f32 / 448.0;
         let scale_y = size.height as f32 / 320.0;
         let scaled_mouse_x = mouse.x / scale_x;
@@ -433,6 +469,7 @@ impl EditorState {
                 }
                 KeyCode::C => {
                     self.level_map = create_default_map();
+                    Self::enforce_ghost_house(&mut self.level_map);
                     self.update_display_map();
                 }
                 KeyCode::Escape => self.mode = EditorMode::Menu,
