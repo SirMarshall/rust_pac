@@ -72,6 +72,7 @@ pub fn load_level_from_string(content: &str) -> Vec<Vec<u8>> {
                     '#' => 1,
                     '.' => 2,
                     'o' => 3,
+                    '-' => 4,
                     _ => 0,
                 })
                 .collect();
@@ -89,6 +90,7 @@ pub fn save_level_to_string(map: &Vec<Vec<u8>>) -> String {
                     1 => '#',
                     2 => '.',
                     3 => 'o',
+                    4 => '-',
                     _ => ' ',
                 })
                 .collect::<String>()

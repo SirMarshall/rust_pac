@@ -27,6 +27,8 @@ struct EditorState {
     mode: EditorMode,
     font: String,
     menu_options: Vec<(String, Rect)>,
+    symmetry_horizontal: bool,
+    symmetry_vertical: bool,
 }
 
 impl EditorState {
@@ -57,11 +59,14 @@ impl EditorState {
         let level_map = if let Ok(mut file) = ctx.fs.open(filepath) {
             let mut content = String::new();
             if file.read_to_string(&mut content).is_ok() {
+                println!("Loaded level from {}", filepath);
                 load_level_from_string(&content)
             } else {
+                eprintln!("Failed to read level content from {}", filepath);
                 create_default_map()
             }
         } else {
+            eprintln!("Failed to open level file: {}", filepath);
             create_default_map()
         };
 
@@ -86,6 +91,8 @@ impl EditorState {
             mode: EditorMode::Menu,
             font,
             menu_options,
+            symmetry_horizontal: false,
+            symmetry_vertical: false,
         };
         state.update_display_map();
         Ok(state)
@@ -147,7 +154,14 @@ impl EditorState {
     fn update_menu(&mut self, ctx: &mut Context) -> GameResult {
         if ctx.mouse.button_pressed(MouseButton::Left) {
             let mouse_pos = ctx.mouse.position();
-            let scaled_pos = Vec2::new(mouse_pos.x / 3.0, mouse_pos.y / 3.0);
+            
+            let window = ctx.gfx.window();
+            let size = window.inner_size();
+            // Use physical size for scaling to handle potential HiDPI mouse issues on Linux
+            let scale_x = size.width as f32 / 448.0;
+            let scale_y = size.height as f32 / 320.0;
+            
+            let scaled_pos = Vec2::new(mouse_pos.x / scale_x, mouse_pos.y / scale_y);
 
             let mut clicked_index = None;
             for (i, (_, rect)) in self.menu_options.iter().enumerate() {
@@ -229,20 +243,52 @@ impl EditorState {
 
     fn update_editor(&mut self, ctx: &mut Context) -> GameResult {
         let mouse = ctx.mouse.position();
-        let scaled_mouse_x = mouse.x / 3.0;
-        let scaled_mouse_y = mouse.y / 3.0;
+        
+        let window = ctx.gfx.window();
+        let size = window.inner_size();
+        // Use physical size for scaling to handle potential HiDPI mouse issues on Linux
+        let scale_x = size.width as f32 / 448.0;
+        let scale_y = size.height as f32 / 320.0;
+
+        let scaled_mouse_x = mouse.x / scale_x;
+        let scaled_mouse_y = mouse.y / scale_y;
 
         if ctx.mouse.button_pressed(MouseButton::Left) {
             let map_offset_x = 112.0;
-            let map_x = ((scaled_mouse_x - map_offset_x) / TILE_SIZE) as isize;
-            let map_y = ((scaled_mouse_y - MAZE_OFFSET_Y) / TILE_SIZE) as isize;
+            let map_x = ((scaled_mouse_x - map_offset_x) / TILE_SIZE).floor() as isize;
+            let map_y = ((scaled_mouse_y - MAZE_OFFSET_Y) / TILE_SIZE).floor() as isize;
             
             if map_x >= 0 && map_y >= 0 {
                 let x = map_x as usize;
                 let y = map_y as usize;
                 if y < self.level_map.len() && x < self.level_map[0].len() {
-                    if self.level_map[y][x] != self.current_tool {
-                        self.level_map[y][x] = self.current_tool;
+                    let mut points = vec![(x, y)];
+                    
+                    if self.symmetry_horizontal {
+                        let sym_x = self.level_map[0].len().saturating_sub(1).saturating_sub(x);
+                        points.push((sym_x, y));
+                    }
+                    
+                    if self.symmetry_vertical {
+                        let sym_y = self.level_map.len().saturating_sub(1).saturating_sub(y);
+                        points.push((x, sym_y));
+                    }
+                    
+                    if self.symmetry_horizontal && self.symmetry_vertical {
+                        let sym_x = self.level_map[0].len().saturating_sub(1).saturating_sub(x);
+                        let sym_y = self.level_map.len().saturating_sub(1).saturating_sub(y);
+                        points.push((sym_x, sym_y));
+                    }
+
+                    let mut changed = false;
+                    for (px, py) in points {
+                        if self.level_map[py][px] != self.current_tool {
+                            self.level_map[py][px] = self.current_tool;
+                            changed = true;
+                        }
+                    }
+                    
+                    if changed {
                         self.update_display_map();
                     }
                 }
@@ -253,8 +299,8 @@ impl EditorState {
 
     fn draw_editor(&mut self, canvas: &mut graphics::Canvas, ctx: &mut Context) -> GameResult {
         let legend_text = [
-            "Controls: [1] Wall | [2] Dot | [3] Big Dot | [0] Erase",
-            "[S] Save | [Esc] Menu | [C] Clear Level",
+            "Controls: [1] Wall | [2] Dot | [3] Big Dot | [4] Fence | [0] Erase",
+            "[S] Save | [Esc] Menu | [C] Clear | [H/V] Symmetry",
         ];
         let mut y = 5.0;
         for line in legend_text.iter() {
@@ -263,6 +309,15 @@ impl EditorState {
             canvas.draw(&text, Vec2::new(5.0, y));
             y += 12.0;
         }
+
+        let sym_text_str = format!("Symmetry: H:[{}] V:[{}]", 
+            if self.symmetry_horizontal { "ON" } else { "OFF" },
+            if self.symmetry_vertical { "ON" } else { "OFF" }
+        );
+        let mut sym_text = Text::new(sym_text_str);
+        sym_text.set_font(self.font.clone()).set_scale(10.0);
+        canvas.draw(&sym_text, Vec2::new(5.0, y));
+        y += 12.0;
         
         let mut tool_text = Text::new("Tool:");
         tool_text.set_font(self.font.clone()).set_scale(10.0);
@@ -273,6 +328,7 @@ impl EditorState {
             1 => Color::BLUE,
             2 => Color::YELLOW,
             3 => Color::RED,
+            4 => Color::MAGENTA,
             _ => Color::WHITE,
         };
         let rect = graphics::Mesh::new_rectangle(
@@ -302,9 +358,11 @@ impl EditorState {
                 let dest_point = Vec2::new(dest_x, dest_y);
 
                 match tile_type {
-                    code @ WALL_CODE_OFFSET..=115 => {
+                    code @ WALL_CODE_OFFSET..=255 => {
                         let wall_index = (code - WALL_CODE_OFFSET) as usize;
-                        canvas.draw(&self.wall_images[wall_index], dest_point);
+                        if wall_index < self.wall_images.len() {
+                            canvas.draw(&self.wall_images[wall_index], dest_point);
+                        }
                     }
                     2 => {
                         let params = DrawParam::new().dest(dest_point).src(self.small_dot_rect);
@@ -314,9 +372,47 @@ impl EditorState {
                         let params = DrawParam::new().dest(dest_point).src(self.big_dot_rect);
                         canvas.draw(&self.sprite_sheet, params);
                     }
+                    4 => {
+                        let rect = graphics::Mesh::new_rectangle(
+                            ctx,
+                            graphics::DrawMode::fill(),
+                            Rect::new(dest_x, dest_y, TILE_SIZE, TILE_SIZE),
+                            Color::MAGENTA,
+                        )?;
+                        canvas.draw(&rect, Vec2::new(0.0, 0.0));
+                    }
                     _ => {}
                 }
             }
+        }
+        
+        // Draw cursor highlight
+        let mouse = ctx.mouse.position();
+        let window = ctx.gfx.window();
+        let size = window.inner_size();
+        // Use physical size for scaling to handle potential HiDPI mouse issues on Linux
+        let scale_x = size.width as f32 / 448.0;
+        let scale_y = size.height as f32 / 320.0;
+        let scaled_mouse_x = mouse.x / scale_x;
+        let scaled_mouse_y = mouse.y / scale_y;
+        
+        let map_x = ((scaled_mouse_x - map_offset_x) / TILE_SIZE).floor() as isize;
+        let map_y = ((scaled_mouse_y - MAZE_OFFSET_Y) / TILE_SIZE).floor() as isize;
+
+        if map_x >= 0 && map_y >= 0 {
+             let x = map_x as usize;
+             let y = map_y as usize;
+             if y < self.display_map.len() && x < self.display_map[0].len() {
+                 let dest_x = (x as f32 * TILE_SIZE) + map_offset_x;
+                 let dest_y = (y as f32 * TILE_SIZE) + MAZE_OFFSET_Y;
+                 let highlight = graphics::Mesh::new_rectangle(
+                     ctx,
+                     graphics::DrawMode::stroke(1.0),
+                     Rect::new(dest_x, dest_y, TILE_SIZE, TILE_SIZE),
+                     Color::new(1.0, 0.0, 0.0, 0.8),
+                 )?;
+                 canvas.draw(&highlight, Vec2::new(0.0, 0.0));
+             }
         }
         
         Ok(())
@@ -328,7 +424,10 @@ impl EditorState {
                 KeyCode::Key1 => self.current_tool = 1,
                 KeyCode::Key2 => self.current_tool = 2,
                 KeyCode::Key3 => self.current_tool = 3,
+                KeyCode::Key4 => self.current_tool = 4,
                 KeyCode::Key0 | KeyCode::Grave => self.current_tool = 0,
+                KeyCode::H => self.symmetry_horizontal = !self.symmetry_horizontal,
+                KeyCode::V => self.symmetry_vertical = !self.symmetry_vertical,
                 KeyCode::S => {
                     self.save_level(ctx)?;
                 }
